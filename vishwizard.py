@@ -22,6 +22,7 @@ class QuadrantTool:
         self.current_profile = "default"
         self.ui_elements = {}
 
+        # --- THE MASTER TEMPLATE ---
         self.MASTER_TEMPLATE = {
             "Who I Am": {"Name": "", "Role": "", "Company": "", "Reason": ""},
             "Target": {"Name": "", "Role": "", "Phone": "", "Email": "", "Location": "", "Other": ""},
@@ -52,15 +53,12 @@ class QuadrantTool:
         self.canvas.bind_all("<MouseWheel>", lambda e: self.canvas.yview_scroll(int(-1*(e.delta/120)), "units"))
 
     def get_time_string(self, custom=False):
-        """Builds the time string from system or dropdowns."""
         if not custom:
             return datetime.datetime.now().strftime("%I:%M %p %Z").strip()
         else:
-            # Pull values from the dropdowns
             return f"{self.hr_var.get()}:{self.min_var.get()} {self.ampm_var.get()} {self.tz_var.get()}"
 
     def add_note_entry(self, text_widget, custom=False):
-        """Appends the entry to the text box and preserves history."""
         timestamp = self.get_time_string(custom)
         text_widget.insert(tk.END, f"\n[{timestamp}] -> ")
         text_widget.see(tk.END)
@@ -73,7 +71,7 @@ class QuadrantTool:
         for w in self.top_frame.winfo_children(): w.destroy()
         for w in self.scroll_content.winfo_children(): w.destroy()
 
-        # --- Header Controls ---
+        # --- Header ---
         p_row = tk.Frame(self.top_frame, bg=self.app_bg_color)
         p_row.pack(fill='x')
         tk.Button(p_row, text="New Profile", command=self.new_profile, fg=self.btn_fg_color).pack(side='left', padx=2)
@@ -123,28 +121,22 @@ class QuadrantTool:
             ctrls = tk.Frame(notes_box, bg="#F0F0F0")
             ctrls.pack(fill='x', padx=5, pady=5)
 
-            # Left: Instant Current Time
             tk.Button(ctrls, text="Add Current Time Entry", bg="#16C47F", fg="white", font=("Arial", 8, "bold"),
                       command=lambda: self.add_note_entry(notes_text, custom=False)).pack(side='left', padx=5)
 
             tk.Label(ctrls, text="| Custom Selection:", bg="#F0F0F0").pack(side='left', padx=5)
             
-            # Custom Time Selectors
             now = datetime.datetime.now()
             self.hr_var = tk.StringVar(value=now.strftime("%I"))
             hr_m = ttk.Combobox(ctrls, textvariable=self.hr_var, width=3, values=[f"{i:02d}" for i in range(1, 13)], state="readonly")
             hr_m.pack(side='left', padx=1)
-            
             tk.Label(ctrls, text=":", bg="#F0F0F0").pack(side='left')
-            
             self.min_var = tk.StringVar(value=now.strftime("%M"))
             min_m = ttk.Combobox(ctrls, textvariable=self.min_var, width=3, values=[f"{i:02d}" for i in range(0, 60)], state="readonly")
             min_m.pack(side='left', padx=1)
-
             self.ampm_var = tk.StringVar(value=now.strftime("%p"))
             ap_m = ttk.Combobox(ctrls, textvariable=self.ampm_var, width=4, values=("AM","PM"), state="readonly")
             ap_m.pack(side='left', padx=2)
-
             self.tz_var = tk.StringVar(value="MDT")
             tz_m = ttk.Combobox(ctrls, textvariable=self.tz_var, width=5, values=("MDT","MST","CDT","CST","EDT","EST","PDT","PST"), state="readonly")
             tz_m.pack(side='left', padx=2)
@@ -180,11 +172,15 @@ class QuadrantTool:
         except: pass
 
     def new_profile(self):
+        """FIXED: Now clears the call log and all data for the new profile."""
         n = simpledialog.askstring("New Profile", "Enter Profile Name:")
         if n:
-            self.sync_to_memory()
+            # Create a fresh copy of the master template (which has empty notes)
             self.profiles[n] = copy.deepcopy(self.MASTER_TEMPLATE)
             self.current_profile = n
+            
+            # Reset UI elements so we don't sync old data into the new profile
+            self.ui_elements = {}
             self.refresh_ui()
 
     def export_json(self):
@@ -201,6 +197,7 @@ class QuadrantTool:
                 data = json.load(f)
             self.profiles[data["active_profile"]] = data["profile_data"]
             self.current_profile = data["active_profile"]
+            self.ui_elements = {}
             self.refresh_ui()
 
     def add_q(self):
