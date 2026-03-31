@@ -2,6 +2,7 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, simpledialog
 import json
 import copy 
+import datetime
 
 class QuadrantTool:
     def __init__(self, root):
@@ -9,26 +10,27 @@ class QuadrantTool:
         self.root.title("VishWizard")
         
         # --- GLOBAL STYLE VARIABLES ---
-        self.app_bg_color = "#2C2C2C"     # Background for the whole tool
-        self.btn_fg_color = "black"       # Font color for all buttons
-        self.quad_bg_color = "#ffffff"    # Background color inside quadrants
-        self.quad_fg_color = "#333333"    # Font color for quadrant titles and field names
+        self.app_bg_color = "#2C2C2C"     
+        self.btn_fg_color = "black"       
+        self.quad_bg_color = "#ffffff"    
+        self.quad_fg_color = "#333333"    
         
         self.root.configure(bg=self.app_bg_color)
         
         self.base_font_size = 9
         self.profiles = {}
         self.current_profile = "default"
-        
+        self.ui_elements = {}
+
         self.MASTER_TEMPLATE = {
             "Who I Am": {"Name": "", "Role": "", "Company": "", "Reason": ""},
             "Target": {"Name": "", "Role": "", "Phone": "", "Email": "", "Location": "", "Other": ""},
             "Pretext": {"Who I work for": "", "Why I'm calling": "", "What I need": "", "Justifications": ""},
-            "Goals & Flags": {"VPN": "", "IT Help Desk": "", "Software": "", "Devices": "", "Security": "", "Other": ""}
+            "Goals & Flags": {"VPN": "", "IT Help Desk": "", "Software": "", "Devices": "", "Security": "", "Other": ""},
+            "Call Notes": {"Notes": ""} 
         }
         
         self.profiles[self.current_profile] = copy.deepcopy(self.MASTER_TEMPLATE)
-        
         self.setup_main_layout()
         self.refresh_ui(initial_load=True)
 
@@ -46,9 +48,23 @@ class QuadrantTool:
 
         self.canvas.pack(side="left", fill="both", expand=True)
         self.scrollbar.pack(side="right", fill="y")
-
         self.canvas.bind('<Configure>', lambda e: self.canvas.itemconfig(self.canvas_win, width=e.width))
         self.canvas.bind_all("<MouseWheel>", lambda e: self.canvas.yview_scroll(int(-1*(e.delta/120)), "units"))
+
+    def get_time_string(self, custom=False):
+        """Builds the time string from system or dropdowns."""
+        if not custom:
+            return datetime.datetime.now().strftime("%I:%M %p %Z").strip()
+        else:
+            # Pull values from the dropdowns
+            return f"{self.hr_var.get()}:{self.min_var.get()} {self.ampm_var.get()} {self.tz_var.get()}"
+
+    def add_note_entry(self, text_widget, custom=False):
+        """Appends the entry to the text box and preserves history."""
+        timestamp = self.get_time_string(custom)
+        text_widget.insert(tk.END, f"\n[{timestamp}] -> ")
+        text_widget.see(tk.END)
+        text_widget.focus_set()
 
     def refresh_ui(self, initial_load=False):
         if hasattr(self, 'ui_elements') and self.ui_elements:
@@ -57,7 +73,7 @@ class QuadrantTool:
         for w in self.top_frame.winfo_children(): w.destroy()
         for w in self.scroll_content.winfo_children(): w.destroy()
 
-        # --- Top Controls ---
+        # --- Header Controls ---
         p_row = tk.Frame(self.top_frame, bg=self.app_bg_color)
         p_row.pack(fill='x')
         tk.Button(p_row, text="New Profile", command=self.new_profile, fg=self.btn_fg_color).pack(side='left', padx=2)
@@ -67,8 +83,10 @@ class QuadrantTool:
 
         q_row = tk.Frame(self.top_frame, bg=self.app_bg_color)
         q_row.pack(fill='x', pady=5)
-        q_count = len(self.profiles[self.current_profile])
-        tk.Label(q_row, text=f"Quadrants ({q_count}/10):", font=("Arial", 9, "bold"), bg=self.app_bg_color,fg="#F3F4F4").pack(side='left', padx=5)
+        
+        current_data = self.profiles[self.current_profile]
+        q_count = len([k for k in current_data.keys() if k != "Call Notes"])
+        tk.Label(q_row, text=f"Quadrants ({q_count}/10):", font=("Arial", 9, "bold"), bg=self.app_bg_color, fg="#F3F4F4").pack(side='left', padx=5)
         tk.Button(q_row, text="+ Add Quadrant", command=self.add_q, bg="#16C47F", fg=self.btn_fg_color).pack(side='left', padx=2)
         tk.Button(q_row, text="- Delete Quadrant", command=self.del_q, bg="#F93827", fg=self.btn_fg_color).pack(side='left', padx=2)
 
@@ -76,10 +94,9 @@ class QuadrantTool:
         self.scroll_content.columnconfigure(1, weight=1)
 
         self.ui_elements = {}
-        data = self.profiles[self.current_profile]
+        standard_quads = {k: v for k, v in current_data.items() if k != "Call Notes"}
 
-        for i, (q_name, fields) in enumerate(data.items()):
-            # Switched to tk.LabelFrame to allow background/font color changes
+        for i, (q_name, fields) in enumerate(standard_quads.items()):
             box = tk.LabelFrame(self.scroll_content, text=f" {q_name} ", bg=self.quad_bg_color, fg=self.quad_fg_color, font=("Arial", 10, "bold"))
             box.grid(row=i//2, column=i%2, padx=10, pady=10, sticky='nsew')
             box.columnconfigure(1, weight=1)
@@ -92,41 +109,75 @@ class QuadrantTool:
             self.ui_elements[q_name] = {}
             for r, (fname, val) in enumerate(fields.items(), start=1):
                 tk.Label(box, text=fname, font=("Arial", self.base_font_size), bg=self.quad_bg_color, fg=self.quad_fg_color).grid(row=r, column=0, sticky='nw', padx=5, pady=2)
-                
-                # Text box colors remain default as requested
                 t = tk.Text(box, height=1, wrap="word", font=("Arial", self.base_font_size), undo=True, width=15)
                 t.insert("1.0", val)
                 t.grid(row=r, column=1, sticky='ew', padx=5, pady=2)
-                
                 t.bind("<KeyRelease>", lambda e: self.adjust_height(e.widget))
                 self.ui_elements[q_name][fname] = t
-        
-        self.root.after(100, self.batch_adjust_heights)
 
-        if initial_load:
-            self.root.update_idletasks()
-            width = self.scroll_content.winfo_reqwidth() + 50
-            height = self.scroll_content.winfo_reqheight() + self.top_frame.winfo_reqheight() + 100
-            self.root.geometry(f"{max(850, width)}x{max(700, height)}")
+        # --- CALL NOTES LOG ---
+        if "Call Notes" in current_data:
+            notes_box = tk.LabelFrame(self.scroll_content, text=" CALL NOTES LOG ", bg="#F0F0F0", fg="black", font=("Arial", 10, "bold"))
+            notes_box.grid(row=(len(standard_quads)//2)+1, column=0, columnspan=2, padx=10, pady=20, sticky='nsew')
+            
+            ctrls = tk.Frame(notes_box, bg="#F0F0F0")
+            ctrls.pack(fill='x', padx=5, pady=5)
+
+            # Left: Instant Current Time
+            tk.Button(ctrls, text="Add Current Time Entry", bg="#16C47F", fg="white", font=("Arial", 8, "bold"),
+                      command=lambda: self.add_note_entry(notes_text, custom=False)).pack(side='left', padx=5)
+
+            tk.Label(ctrls, text="| Custom Selection:", bg="#F0F0F0").pack(side='left', padx=5)
+            
+            # Custom Time Selectors
+            now = datetime.datetime.now()
+            self.hr_var = tk.StringVar(value=now.strftime("%I"))
+            hr_m = ttk.Combobox(ctrls, textvariable=self.hr_var, width=3, values=[f"{i:02d}" for i in range(1, 13)], state="readonly")
+            hr_m.pack(side='left', padx=1)
+            
+            tk.Label(ctrls, text=":", bg="#F0F0F0").pack(side='left')
+            
+            self.min_var = tk.StringVar(value=now.strftime("%M"))
+            min_m = ttk.Combobox(ctrls, textvariable=self.min_var, width=3, values=[f"{i:02d}" for i in range(0, 60)], state="readonly")
+            min_m.pack(side='left', padx=1)
+
+            self.ampm_var = tk.StringVar(value=now.strftime("%p"))
+            ap_m = ttk.Combobox(ctrls, textvariable=self.ampm_var, width=4, values=("AM","PM"), state="readonly")
+            ap_m.pack(side='left', padx=2)
+
+            self.tz_var = tk.StringVar(value="MDT")
+            tz_m = ttk.Combobox(ctrls, textvariable=self.tz_var, width=5, values=("MDT","MST","CDT","CST","EDT","EST","PDT","PST"), state="readonly")
+            tz_m.pack(side='left', padx=2)
+
+            tk.Button(ctrls, text="Add Custom Entry", bg="#00A8E8", fg="white", font=("Arial", 8, "bold"),
+                      command=lambda: self.add_note_entry(notes_text, custom=True)).pack(side='left', padx=5)
+
+            notes_text = tk.Text(notes_box, height=12, wrap="word", font=("Arial", 10), undo=True)
+            notes_text.insert("1.0", current_data["Call Notes"].get("Notes", ""))
+            notes_text.pack(fill='both', expand=True, padx=5, pady=5)
+            self.ui_elements["Call Notes"] = {"Notes": notes_text}
+
+        self.root.after(100, self.batch_adjust_heights)
+        if initial_load: self.root.geometry("1000x900")
+
+    def sync_to_memory(self):
+        for q_name, fields in self.ui_elements.items():
+            if q_name in self.profiles[self.current_profile]:
+                for f_name, widget in fields.items():
+                    self.profiles[self.current_profile][q_name][f_name] = widget.get("1.0", "end-1c")
 
     def batch_adjust_heights(self):
         for q in self.ui_elements.values():
             for t in q.values():
-                self.adjust_height(t)
+                if isinstance(t, tk.Text) and t.winfo_height() < 50:
+                    self.adjust_height(t)
 
     def adjust_height(self, widget):
         try:
             if widget.winfo_width() > 1:
                 lines = int(widget.tk.call(widget._w, "count", "-displaylines", "1.0", "end-1c"))
                 widget.configure(height=min(15, max(1, lines)))
-        except tk.TclError:
-            pass
-
-    def sync_to_memory(self):
-        for q_name, fields in self.ui_elements.items():
-            if q_name in self.profiles[self.current_profile]:
-                for f_name, widget in fields.items():
-                    self.profiles[self.current_profile][q_name][f_name] = widget.get("1.0", "end-1c").strip()
+        except: pass
 
     def new_profile(self):
         n = simpledialog.askstring("New Profile", "Enter Profile Name:")
@@ -134,59 +185,53 @@ class QuadrantTool:
             self.sync_to_memory()
             self.profiles[n] = copy.deepcopy(self.MASTER_TEMPLATE)
             self.current_profile = n
-            self.ui_elements = {} 
             self.refresh_ui()
 
     def export_json(self):
         self.sync_to_memory()
-        export_package = {
-            "active_profile": self.current_profile,
-            "profile_data": self.profiles[self.current_profile]
-        }
-        file = filedialog.asksaveasfilename(initialfile=f"{self.current_profile}_config.json", defaultextension=".json")
+        file = filedialog.asksaveasfilename(defaultextension=".json")
         if file:
             with open(file, "w") as f:
-                json.dump(export_package, f, indent=2)
-            messagebox.showinfo("Exported", f"Saved ONLY profile: {self.current_profile}")
+                json.dump({"active_profile": self.current_profile, "profile_data": self.profiles[self.current_profile]}, f, indent=2)
 
     def import_json(self):
         file = filedialog.askopenfilename(filetypes=[("JSON files","*.json")])
         if file:
             with open(file, "r") as f:
                 data = json.load(f)
-            if "active_profile" in data and "profile_data" in data:
-                self.profiles[data["active_profile"]] = data["profile_data"]
-                self.current_profile = data["active_profile"]
-            else:
-                self.profiles.update(data)
-                self.current_profile = list(data.keys())[0]
-            self.ui_elements = {}
+            self.profiles[data["active_profile"]] = data["profile_data"]
+            self.current_profile = data["active_profile"]
             self.refresh_ui()
 
     def add_q(self):
-        if len(self.profiles[self.current_profile]) >= 10: return
+        if len(self.profiles[self.current_profile]) >= 11: return
         n = simpledialog.askstring("Add", "Quadrant Name:")
         if n: 
+            self.sync_to_memory()
             self.profiles[self.current_profile][n] = {"New Field": ""}
             self.refresh_ui()
 
     def del_q(self):
-        if len(self.profiles[self.current_profile]) <= 1: return
         n = simpledialog.askstring("Delete", "Exact Quadrant Name:")
-        if n in self.profiles[self.current_profile]:
+        if n in self.profiles[self.current_profile] and n != "Call Notes":
+            self.sync_to_memory()
             del self.profiles[self.current_profile][n]
             self.refresh_ui()
 
     def add_f(self, q_name):
         n = simpledialog.askstring("Field", "Field Name:")
         if n:
+            self.sync_to_memory()
             self.profiles[self.current_profile][q_name][n] = ""
             self.refresh_ui()
 
     def del_f(self, q_name):
-        f_list = list(self.profiles[self.current_profile][q_name].keys())
-        n = simpledialog.askstring("Remove", f"Field in {q_name}:\n{f_list}")
-        if n in self.profiles[self.current_profile][q_name]:
+        fields = self.profiles[self.current_profile][q_name]
+        f_list = list(fields.keys())
+        if len(f_list) <= 1: return
+        n = simpledialog.askstring("Remove", f"Field to remove from {q_name}:\n{', '.join(f_list)}")
+        if n in fields:
+            self.sync_to_memory()
             del self.profiles[self.current_profile][q_name][n]
             self.refresh_ui()
 
