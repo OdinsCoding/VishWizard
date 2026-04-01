@@ -229,6 +229,7 @@ class QuadrantTool:
         n = simpledialog.askstring("Remove Field", f"Field to remove from '{q_name}':")
         if not n or n not in fields:
             return
+        self.sync_to_memory()
         del self.profiles[self.current_profile][q_name][n]
         self.ui_elements = {}
         self.refresh_ui()
