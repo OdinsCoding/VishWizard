@@ -172,14 +172,10 @@ class QuadrantTool:
         except: pass
 
     def new_profile(self):
-        """FIXED: Now clears the call log and all data for the new profile."""
         n = simpledialog.askstring("New Profile", "Enter Profile Name:")
         if n:
-            # Create a fresh copy of the master template (which has empty notes)
             self.profiles[n] = copy.deepcopy(self.MASTER_TEMPLATE)
             self.current_profile = n
-            
-            # Reset UI elements so we don't sync old data into the new profile
             self.ui_elements = {}
             self.refresh_ui()
 
@@ -203,9 +199,11 @@ class QuadrantTool:
     def add_q(self):
         if len(self.profiles[self.current_profile]) >= 11: return
         n = simpledialog.askstring("Add", "Quadrant Name:")
-        if n: 
+        if n:
+            f = simpledialog.askstring("Add", "First Field Name:")
+            if not f: return
             self.sync_to_memory()
-            self.profiles[self.current_profile][n] = {"New Field": ""}
+            self.profiles[self.current_profile][n] = {f: ""}
             self.refresh_ui()
 
     def del_q(self):
@@ -225,12 +223,15 @@ class QuadrantTool:
     def del_f(self, q_name):
         fields = self.profiles[self.current_profile][q_name]
         f_list = list(fields.keys())
-        if len(f_list) <= 1: return
-        n = simpledialog.askstring("Remove", f"Field to remove from {q_name}:\n{', '.join(f_list)}")
-        if n in fields:
-            self.sync_to_memory()
-            del self.profiles[self.current_profile][q_name][n]
-            self.refresh_ui()
+        if len(f_list) <= 1:
+            messagebox.showinfo("Can't Delete", "A quadrant must have at least one field.")
+            return
+        n = simpledialog.askstring("Remove Field", f"Field to remove from '{q_name}':")
+        if not n or n not in fields:
+            return
+        del self.profiles[self.current_profile][q_name][n]
+        self.ui_elements = {}
+        self.refresh_ui()
 
 if __name__ == "__main__":
     root = tk.Tk()
