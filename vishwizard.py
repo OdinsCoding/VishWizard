@@ -54,12 +54,27 @@ class QuadrantTool:
 
     def get_time_string(self, custom=False):
         if not custom:
-            return datetime.datetime.now().strftime("%I:%M %p %Z").strip()
+            now = datetime.datetime.now()
+            tz_var = getattr(self, "current_tz_var", None)
+            tz = tz_var.get() if tz_var else now.strftime("%Z").strip() or "LOCAL"
+            return f"{now.strftime('%I:%M %p')} {tz}"
         else:
             return f"{self.hr_var.get()}:{self.min_var.get()} {self.ampm_var.get()} {self.tz_var.get()}"
 
+    def get_date_string(self, custom=False):
+        if not custom:
+            return datetime.datetime.now().strftime("%m/%d/%Y")
+        else:
+            mo = getattr(self, "month_var", None)
+            da = getattr(self, "day_var", None)
+            yr = getattr(self, "year_var", None)
+            if mo and da and yr:
+                return f"{mo.get()}/{da.get()}/{yr.get()}"
+            return datetime.datetime.now().strftime("%m/%d/%Y")
+
     def add_note_entry(self, text_widget, custom=False):
         timestamp = self.get_time_string(custom)
+        date_str = self.get_date_string(custom)
         caller = getattr(self, "caller_id_entry", None)
         target = getattr(self, "target_phone_entry", None)
         caller_val = caller.get() if caller else ""
@@ -72,7 +87,7 @@ class QuadrantTool:
             if caller_val: parts.append(f"From: {caller_val}")
             if target_val: parts.append(f"To: {target_val}")
             phone_str = " | " + " | ".join(parts)
-        text_widget.insert(tk.END, f"\n[{timestamp}]{phone_str} -> ")
+        text_widget.insert(tk.END, f"\n[{date_str} {timestamp}]{phone_str} -> ")
         text_widget.see(tk.END)
         text_widget.focus_set()
 
@@ -154,8 +169,31 @@ class QuadrantTool:
             tk.Button(ctrls, text="Add Current Time Entry", bg="#16C47F", fg="white", font=("Arial", 8, "bold"),
                       command=lambda: self.add_note_entry(notes_text, custom=False)).pack(side='left', padx=5)
 
-            tk.Label(ctrls, text="| Custom Selection:", bg="#F0F0F0").pack(side='left', padx=5)
-            
+            self.current_tz_var = tk.StringVar(value="MDT")
+            current_tz_m = ttk.Combobox(ctrls, textvariable=self.current_tz_var, width=5,
+                                        values=("MDT","MST","CDT","CST","EDT","EST","PDT","PST"), state="readonly")
+            current_tz_m.pack(side='left', padx=(0, 5))
+
+            tk.Label(ctrls, text="| Custom Date:", bg="#F0F0F0").pack(side='left', padx=5)
+
+            now = datetime.datetime.now()
+            self.month_var = tk.StringVar(value=now.strftime("%m"))
+            month_m = ttk.Combobox(ctrls, textvariable=self.month_var, width=3,
+                                   values=[f"{i:02d}" for i in range(1, 13)], state="readonly")
+            month_m.pack(side='left', padx=1)
+            tk.Label(ctrls, text="/", bg="#F0F0F0").pack(side='left')
+            self.day_var = tk.StringVar(value=now.strftime("%d"))
+            day_m = ttk.Combobox(ctrls, textvariable=self.day_var, width=3,
+                                 values=[f"{i:02d}" for i in range(1, 32)], state="readonly")
+            day_m.pack(side='left', padx=1)
+            tk.Label(ctrls, text="/", bg="#F0F0F0").pack(side='left')
+            self.year_var = tk.StringVar(value=now.strftime("%Y"))
+            year_m = ttk.Combobox(ctrls, textvariable=self.year_var, width=5,
+                                  values=[str(now.year + i) for i in range(-2, 3)], state="readonly")
+            year_m.pack(side='left', padx=1)
+
+            tk.Label(ctrls, text="| Custom Time:", bg="#F0F0F0").pack(side='left', padx=5)
+
             now = datetime.datetime.now()
             self.hr_var = tk.StringVar(value=now.strftime("%I"))
             hr_m = ttk.Combobox(ctrls, textvariable=self.hr_var, width=3, values=[f"{i:02d}" for i in range(1, 13)], state="readonly")
