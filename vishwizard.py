@@ -24,7 +24,7 @@ class QuadrantTool:
 
         # --- THE MASTER TEMPLATE ---
         self.MASTER_TEMPLATE = {
-            "Who I Am": {"Name": "", "Role": "", "Company": "", "Reason": ""},
+            "Who I Am": {"Name": "", "Role": "", "Company": ""},
             "Target": {"Name": "", "Role": "", "Phone": "", "Email": "", "Location": "", "Other": ""},
             "Pretext": {"Who I work for": "", "Why I'm calling": "", "What I need": "", "Justifications": ""},
             "Goals & Flags": {"VPN": "", "IT Help Desk": "", "Software": "", "Devices": "", "Security": "", "Other": ""},
@@ -87,7 +87,11 @@ class QuadrantTool:
             if caller_val: parts.append(f"From: {caller_val}")
             if target_val: parts.append(f"To: {target_val}")
             phone_str = " | " + " | ".join(parts)
-        text_widget.insert(tk.END, f"\n[{date_str} {timestamp}]{phone_str} -> ")
+        name_entry = getattr(self, "target_name_entry", None)
+        name_val = name_entry.get() if name_entry else ""
+        if name_val in ("", "First Last"): name_val = None
+        name_str = f" | Target: {name_val}" if name_val else ""
+        text_widget.insert(tk.END, f"\n[{date_str} {timestamp}]{name_str}{phone_str} -> ")
         text_widget.see(tk.END)
         text_widget.focus_set()
 
@@ -127,7 +131,7 @@ class QuadrantTool:
             box.columnconfigure(1, weight=1)
 
             btns = tk.Frame(box, bg=self.quad_bg_color)
-            btns.grid(row=0, column=0, columnspan=2, sticky='e')
+            btns.grid(row=0, column=0, columnspan=2, sticky='e', padx=(0, 8))
             tk.Button(btns, text="+", width=2, command=lambda n=q_name: self.add_f(n), fg=self.btn_fg_color).pack(side='right')
             tk.Button(btns, text="-", width=2, command=lambda n=q_name: self.del_f(n), fg=self.btn_fg_color).pack(side='right')
 
@@ -148,6 +152,13 @@ class QuadrantTool:
             # --- Phone number row ---
             phone_row = tk.Frame(notes_box, bg="#F0F0F0")
             phone_row.pack(fill='x', padx=5, pady=(5, 0))
+
+            tk.Label(phone_row, text="Target Name:", bg="#F0F0F0", font=("Arial", 8, "bold")).pack(side='left', padx=(0, 3))
+            self.target_name_entry = tk.Entry(phone_row, width=18, font=("Arial", 9), fg="grey")
+            self.target_name_entry.insert(0, "First Last")
+            self.target_name_entry.pack(side='left', padx=(0, 10))
+            self.target_name_entry.bind("<FocusIn>", lambda e: (e.widget.delete(0, tk.END), e.widget.config(fg="black")) if e.widget.get() == "First Last" else None)
+            self.target_name_entry.bind("<FocusOut>", lambda e: (e.widget.insert(0, "First Last"), e.widget.config(fg="grey")) if e.widget.get() == "" else None)
 
             tk.Label(phone_row, text="Outbound Caller ID:", bg="#F0F0F0", font=("Arial", 8, "bold")).pack(side='left', padx=(0, 3))
             self.caller_id_entry = tk.Entry(phone_row, width=14, font=("Arial", 9), fg="grey")
@@ -267,12 +278,58 @@ class QuadrantTool:
 
     def add_q(self):
         if len(self.profiles[self.current_profile]) >= 11: return
-        n = simpledialog.askstring("Add", "Quadrant Name:")
-        if n:
-            f = simpledialog.askstring("Add", "First Field Name:")
-            if not f: return
+
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Add Quadrant")
+        dialog.transient(self.root)
+        dialog.grab_set()
+        dialog.resizable(False, False)
+        dialog.attributes("-topmost", True)
+
+        # Center over root
+        self.root.update_idletasks()
+        rx, ry = self.root.winfo_rootx(), self.root.winfo_rooty()
+        rw, rh = self.root.winfo_width(), self.root.winfo_height()
+        dialog.update_idletasks()
+        dw, dh = 280, 140
+        dialog.geometry(f"{dw}x{dh}+{rx + (rw - dw)//2}+{ry + (rh - dh)//2}")
+
+        tk.Label(dialog, text="Quadrant Name:", anchor="w").pack(fill="x", padx=15, pady=(15, 2))
+        name_entry = tk.Entry(dialog, width=30)
+        name_entry.pack(padx=15)
+        name_entry.focus_set()
+
+        tk.Label(dialog, text="First Section Name:", anchor="w").pack(fill="x", padx=15, pady=(8, 2))
+        field_entry = tk.Entry(dialog, width=30)
+        field_entry.pack(padx=15)
+
+        result = {}
+
+        def on_ok(e=None):
+            n = name_entry.get().strip()
+            f = field_entry.get().strip()
+            if n and f:
+                result["name"] = n
+                result["field"] = f
+            dialog.destroy()
+
+        def on_cancel(e=None):
+            dialog.destroy()
+
+        btn_row = tk.Frame(dialog)
+        btn_row.pack(pady=10)
+        tk.Button(btn_row, text="OK", width=8, command=on_ok).pack(side="left", padx=5)
+        tk.Button(btn_row, text="Cancel", width=8, command=on_cancel).pack(side="left", padx=5)
+
+        name_entry.bind("<Return>", lambda e: field_entry.focus_set())
+        field_entry.bind("<Return>", on_ok)
+        dialog.bind("<Escape>", on_cancel)
+
+        dialog.wait_window()
+
+        if "name" in result:
             self.sync_to_memory()
-            self.profiles[self.current_profile][n] = {f: ""}
+            self.profiles[self.current_profile][result["name"]] = {result["field"]: ""}
             self.refresh_ui()
 
     def del_q(self):
