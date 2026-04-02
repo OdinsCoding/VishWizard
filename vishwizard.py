@@ -146,7 +146,7 @@ class QuadrantTool:
 
         # --- CALL NOTES LOG ---
         if "Call Notes" in current_data:
-            notes_box = tk.LabelFrame(self.scroll_content, text=" CALL NOTES LOG ", bg="#F0F0F0", fg="black", font=("Arial", 10, "bold"))
+            notes_box = tk.LabelFrame(self.scroll_content, text=" CALL LOG NOTES ", bg="#F0F0F0", fg="black", font=("Arial", 10, "bold"))
             notes_box.grid(row=(len(standard_quads)//2)+1, column=0, columnspan=2, padx=10, pady=20, sticky='nsew')
             
             # --- Phone number row ---
