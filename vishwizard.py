@@ -60,7 +60,19 @@ class QuadrantTool:
 
     def add_note_entry(self, text_widget, custom=False):
         timestamp = self.get_time_string(custom)
-        text_widget.insert(tk.END, f"\n[{timestamp}] -> ")
+        caller = getattr(self, "caller_id_entry", None)
+        target = getattr(self, "target_phone_entry", None)
+        caller_val = caller.get() if caller else ""
+        target_val = target.get() if target else ""
+        if caller_val in ("", "000-000-0000"): caller_val = None
+        if target_val in ("", "000-000-0000"): target_val = None
+        phone_str = ""
+        if caller_val or target_val:
+            parts = []
+            if caller_val: parts.append(f"From: {caller_val}")
+            if target_val: parts.append(f"To: {target_val}")
+            phone_str = " | " + " | ".join(parts)
+        text_widget.insert(tk.END, f"\n[{timestamp}]{phone_str} -> ")
         text_widget.see(tk.END)
         text_widget.focus_set()
 
@@ -110,7 +122,7 @@ class QuadrantTool:
                 t = tk.Text(box, height=1, wrap="word", font=("Arial", self.base_font_size), undo=True, width=15)
                 t.insert("1.0", val)
                 t.grid(row=r, column=1, sticky='ew', padx=5, pady=2)
-                t.bind("<KeyRelease>", lambda e: self.adjust_height(e.widget))
+                t.bind("<KeyRelease>", lambda e: e.widget.after(0, self.adjust_height, e.widget))
                 self.ui_elements[q_name][fname] = t
 
         # --- CALL NOTES LOG ---
@@ -118,6 +130,24 @@ class QuadrantTool:
             notes_box = tk.LabelFrame(self.scroll_content, text=" CALL NOTES LOG ", bg="#F0F0F0", fg="black", font=("Arial", 10, "bold"))
             notes_box.grid(row=(len(standard_quads)//2)+1, column=0, columnspan=2, padx=10, pady=20, sticky='nsew')
             
+            # --- Phone number row ---
+            phone_row = tk.Frame(notes_box, bg="#F0F0F0")
+            phone_row.pack(fill='x', padx=5, pady=(5, 0))
+
+            tk.Label(phone_row, text="Outbound Caller ID:", bg="#F0F0F0", font=("Arial", 8, "bold")).pack(side='left', padx=(0, 3))
+            self.caller_id_entry = tk.Entry(phone_row, width=14, font=("Arial", 9), fg="grey")
+            self.caller_id_entry.insert(0, "000-000-0000")
+            self.caller_id_entry.pack(side='left', padx=(0, 10))
+            self.caller_id_entry.bind("<FocusIn>", lambda e: (e.widget.delete(0, tk.END), e.widget.config(fg="black")) if e.widget.get() == "000-000-0000" else None)
+            self.caller_id_entry.bind("<FocusOut>", lambda e: (e.widget.insert(0, "000-000-0000"), e.widget.config(fg="grey")) if e.widget.get() == "" else None)
+
+            tk.Label(phone_row, text="Target Phone:", bg="#F0F0F0", font=("Arial", 8, "bold")).pack(side='left', padx=(0, 3))
+            self.target_phone_entry = tk.Entry(phone_row, width=14, font=("Arial", 9), fg="grey")
+            self.target_phone_entry.insert(0, "000-000-0000")
+            self.target_phone_entry.pack(side='left', padx=(0, 10))
+            self.target_phone_entry.bind("<FocusIn>", lambda e: (e.widget.delete(0, tk.END), e.widget.config(fg="black")) if e.widget.get() == "000-000-0000" else None)
+            self.target_phone_entry.bind("<FocusOut>", lambda e: (e.widget.insert(0, "000-000-0000"), e.widget.config(fg="grey")) if e.widget.get() == "" else None)
+
             ctrls = tk.Frame(notes_box, bg="#F0F0F0")
             ctrls.pack(fill='x', padx=5, pady=5)
 
@@ -169,6 +199,7 @@ class QuadrantTool:
             if widget.winfo_width() > 1:
                 lines = int(widget.tk.call(widget._w, "count", "-displaylines", "1.0", "end-1c"))
                 widget.configure(height=min(15, max(1, lines)))
+                widget.yview_moveto(0.0)
         except: pass
 
     def new_profile(self):
@@ -181,7 +212,7 @@ class QuadrantTool:
 
     def export_json(self):
         self.sync_to_memory()
-        file = filedialog.asksaveasfilename(defaultextension=".json")
+        file = filedialog.asksaveasfilename(defaultextension=".json", filetypes=[("JSON files", "*.json"), ("All files", "*.*")])
         if file:
             with open(file, "w") as f:
                 json.dump({"active_profile": self.current_profile, "profile_data": self.profiles[self.current_profile]}, f, indent=2)
