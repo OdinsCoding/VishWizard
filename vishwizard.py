@@ -24,7 +24,7 @@ class QuadrantTool:
 
         # --- THE MASTER TEMPLATE ---
         self.MASTER_TEMPLATE = {
-            "Who I Am": {"Name": "", "Role": "", "Company": ""},
+            "Who I Am": {"Name": "", "Role": "", "Company": "", "Time in Position": ""},
             "Target": {"Name": "", "Role": "", "Phone": "", "Email": "", "Location": "", "Other": ""},
             "Pretext": {"Who I work for": "", "Why I'm calling": "", "What I need": "", "Justifications": ""},
             "Goals & Flags": {"VPN": "", "IT Help Desk": "", "Software": "", "Devices": "", "Security": "", "Other": ""},
