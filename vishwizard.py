@@ -26,7 +26,7 @@ class QuadrantTool:
         self.MASTER_TEMPLATE = {
             "Who I Am": {"Name": "", "Role": "", "Company": "", "Time in Position": ""},
             "Target": {"Name": "", "Role": "", "Phone": "", "Email": "", "Location": "", "Other": ""},
-            "Pretext": {"Who I work for": "", "Why I'm calling": "", "What I need": "", "Justifications": ""},
+            "Pretext": {"Who I work for": "", "Why I'm calling": "", "What I need": "", "Justifications": "", "Payload": ""},
             "Goals & Flags": {"VPN": "", "IT Help Desk": "", "Software": "", "Devices": "", "Security": "", "Other": ""},
             "Call Notes": {"Notes": ""} 
         }
@@ -36,21 +36,89 @@ class QuadrantTool:
         self.refresh_ui(initial_load=True)
 
     def setup_main_layout(self):
+        # ── Header bar — always visible at top ──────────────────────────────
         self.top_frame = tk.Frame(self.root, bg=self.app_bg_color)
         self.top_frame.pack(side="top", fill="x", padx=5, pady=5)
 
-        self.canvas = tk.Canvas(self.root, highlightthickness=0, bg=self.app_bg_color)
-        self.scrollbar = ttk.Scrollbar(self.root, orient="vertical", command=self.canvas.yview)
-        self.scroll_content = tk.Frame(self.canvas, bg=self.app_bg_color)
+        # ── Middle section: quadrant canvas (scrollable) + call log canvas ──
+        # They share a single right-side scrollbar column via a PanedWindow
+        # so each scrolls independently without conflicting.
 
-        self.scroll_content.bind("<Configure>", lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all")))
-        self.canvas_win = self.canvas.create_window((0, 0), window=self.scroll_content, anchor="nw")
-        self.canvas.configure(yscrollcommand=self.scrollbar.set)
+        # Quadrant scrollable area (top pane)
+        quad_outer = tk.Frame(self.root, bg=self.app_bg_color)
+        quad_outer.pack(side="top", fill="x", padx=12, pady=(5, 0))
 
-        self.canvas.pack(side="left", fill="both", expand=True)
-        self.scrollbar.pack(side="right", fill="y")
-        self.canvas.bind('<Configure>', lambda e: self.canvas.itemconfig(self.canvas_win, width=e.width))
-        self.canvas.bind_all("<MouseWheel>", lambda e: self.canvas.yview_scroll(int(-1*(e.delta/120)), "units"))
+        self.quad_canvas = tk.Canvas(quad_outer, highlightthickness=0, bg=self.app_bg_color)
+        quad_sb = ttk.Scrollbar(quad_outer, orient="vertical", command=self.quad_canvas.yview)
+        self.quad_frame = tk.Frame(self.quad_canvas, bg=self.app_bg_color)
+
+        self.quad_frame.columnconfigure(0, weight=1)
+        self.quad_frame.columnconfigure(1, weight=1)
+        self.quad_frame.bind("<Configure>", self._update_quad_scroll)
+
+        self.quad_canvas_win = self.quad_canvas.create_window((0, 0), window=self.quad_frame, anchor="nw")
+        self.quad_canvas.configure(yscrollcommand=quad_sb.set)
+
+        self.quad_canvas.pack(side="left", fill="both", expand=True)
+        quad_sb.pack(side="right", fill="y")
+        self.quad_canvas.bind("<Configure>", lambda e: (
+            self.quad_canvas.itemconfig(self.quad_canvas_win, width=e.width),
+            self._update_quad_scroll()
+        ))
+
+        # Call log scrollable area (bottom pane, expands to fill remaining space)
+        log_outer = tk.Frame(self.root, bg=self.app_bg_color)
+        log_outer.pack(side="top", fill="both", expand=True, padx=0, pady=0)
+
+        self.log_canvas = tk.Canvas(log_outer, highlightthickness=0, bg=self.app_bg_color)
+        self.log_scrollbar = ttk.Scrollbar(log_outer, orient="vertical", command=self.log_canvas.yview)
+        self.scroll_content = tk.Frame(self.log_canvas, bg=self.app_bg_color)
+
+        self.scroll_content.bind("<Configure>", lambda e: self.log_canvas.configure(
+            scrollregion=self.log_canvas.bbox("all")))
+        self.log_canvas_win = self.log_canvas.create_window((0, 0), window=self.scroll_content, anchor="nw")
+        self.log_canvas.configure(yscrollcommand=self.log_scrollbar.set)
+
+        self.log_canvas.pack(side="left", fill="both", expand=True)
+        self.log_scrollbar.pack(side="right", fill="y")
+        self.log_canvas.bind("<Configure>", lambda e: self.log_canvas.itemconfig(
+            self.log_canvas_win, width=e.width))
+
+        # ── Mouse wheel routing ──────────────────────────────────────────────
+        def _on_mousewheel(e):
+            w = e.widget
+            # If inside a Text widget let it handle its own scroll
+            while w:
+                if isinstance(w, tk.Text):
+                    return
+                try: w = w.master
+                except Exception: break
+            # Route to whichever canvas the cursor is over
+            cx = self.root.winfo_pointerx() - self.root.winfo_rootx()
+            cy = self.root.winfo_pointery() - self.root.winfo_rooty()
+            # Check if pointer is inside quad_canvas bounds
+            qx1 = self.quad_canvas.winfo_x()
+            qy1 = self.quad_canvas.winfo_y()
+            qx2 = qx1 + self.quad_canvas.winfo_width()
+            qy2 = qy1 + self.quad_canvas.winfo_height()
+            if qx1 <= cx <= qx2 and qy1 <= cy <= qy2:
+                self.quad_canvas.yview_scroll(int(-1*(e.delta/120)), "units")
+            else:
+                self.log_canvas.yview_scroll(int(-1*(e.delta/120)), "units")
+
+        self.root.bind_all("<MouseWheel>", _on_mousewheel)
+
+    def _update_quad_scroll(self, _=None):
+        """Resize quad_canvas height to fit content up to a max, enable scroll if overflow."""
+        self.quad_canvas.update_idletasks()
+        content_h = self.quad_frame.winfo_reqheight()
+        # Cap visible height: show default quads (~450px), allow scroll for extras
+        if self.root.state() == 'zoomed' or self.root.attributes('-fullscreen'):
+            max_h = 650 # Increased for fullscreen
+        else:
+            max_h = 480  # Standard size
+        visible_h = min(content_h, max_h)
+        self.quad_canvas.configure(height=visible_h, scrollregion=self.quad_canvas.bbox("all"))
 
     def get_time_string(self, custom=False):
         if not custom:
@@ -74,32 +142,113 @@ class QuadrantTool:
 
     def add_note_entry(self, text_widget, custom=False):
         timestamp = self.get_time_string(custom)
-        date_str = self.get_date_string(custom)
-        caller = getattr(self, "caller_id_entry", None)
-        target = getattr(self, "target_phone_entry", None)
-        caller_val = caller.get() if caller else ""
-        target_val = target.get() if target else ""
-        if caller_val in ("", "000-000-0000"): caller_val = None
-        if target_val in ("", "000-000-0000"): target_val = None
-        phone_str = ""
-        if caller_val or target_val:
-            parts = []
-            if caller_val: parts.append(f"From: {caller_val}")
-            if target_val: parts.append(f"To: {target_val}")
-            phone_str = " | " + " | ".join(parts)
-        name_entry = getattr(self, "target_name_entry", None)
-        name_val = name_entry.get() if name_entry else ""
-        if name_val in ("", "First Last"): name_val = None
-        name_str = f" | Target: {name_val}" if name_val else ""
-        text_widget.insert(tk.END, f"\n[{date_str} {timestamp}]{name_str}{phone_str} -> ")
+        date_str  = self.get_date_string(custom)
+
+        def get_val(attr, *placeholders):
+            e = getattr(self, attr, None)
+            v = e.get().strip() if e else ""
+            return None if v in ("", *placeholders) else v
+
+        t_name  = get_val("target_name_entry",         "First Last")
+        t_pos   = get_val("target_position_entry",     "Job Title")
+        t_phone = get_val("target_phone_entry",        "000-000-0000")
+        c_name  = get_val("calling_as_entry",          "First Last")
+        c_pos   = get_val("calling_as_position_entry", "Job Title")
+        c_id    = get_val("caller_id_entry",           "000-000-0000")
+
+        parts = []
+        if t_name or t_pos:
+            t_str = t_name or ""
+            if t_pos: t_str += f" ({t_pos})"
+            parts.append(f"Target: {t_str.strip()}")
+        if t_phone:
+            parts.append(f"To: {t_phone}")
+        if c_name or c_pos:
+            c_str = c_name or ""
+            if c_pos: c_str += f" ({c_pos})"
+            parts.append(f"Calling As: {c_str.strip()}")
+        if c_id:
+            parts.append(f"From: {c_id}")
+
+        extra = (" | " + " | ".join(parts)) if parts else ""
+        text_widget.insert(tk.END, f"\n[{date_str} {timestamp}]{extra} -> ")
         text_widget.see(tk.END)
         text_widget.focus_set()
+
+    def _build_quad_fields(self, box, q_name):
+        """Render field rows with ▲▼ move buttons. Cols: 0=arrows, 1=label, 2=text."""
+        # Remove all existing field rows (row >= 1)
+        for w in list(box.grid_slaves()):
+            if int(w.grid_info().get("row", 0)) >= 1:
+                w.grid_forget()
+                w.destroy()
+
+        self.ui_elements[q_name] = {}
+        fields = self.profiles[self.current_profile][q_name]
+        keys = list(fields.keys())
+        n = len(keys)
+
+        for r, fname in enumerate(keys, start=1):
+            val = fields[fname]
+
+            # ▲▼ buttons stacked in col 0
+            arrow_frame = tk.Frame(box, bg=self.quad_bg_color)
+            arrow_frame.grid(row=r, column=0, sticky="ns", padx=(3, 0), pady=0)
+
+            idx = r - 1  # 0-based index of this field
+            up_state   = "normal" if idx > 0     else "disabled"
+            down_state = "normal" if idx < n - 1 else "disabled"
+
+            tk.Button(arrow_frame, text="▲", font=("Arial", 6), width=1, pady=0,
+                      relief="flat", bg=self.quad_bg_color, fg="#888888",
+                      state=up_state,
+                      command=lambda qn=q_name, fn=fname: self._move_field(qn, fn, -1)
+                      ).pack(side="top")
+            tk.Button(arrow_frame, text="▼", font=("Arial", 6), width=1, pady=0,
+                      relief="flat", bg=self.quad_bg_color, fg="#888888",
+                      state=down_state,
+                      command=lambda qn=q_name, fn=fname: self._move_field(qn, fn, +1)
+                      ).pack(side="top")
+
+            # Field label col 1
+            tk.Label(box, text=fname, font=("Arial", self.base_font_size),
+                     bg=self.quad_bg_color, fg=self.quad_fg_color
+                     ).grid(row=r, column=1, sticky="nw", padx=(2, 5), pady=2)
+
+            # Text widget col 2
+            t = tk.Text(box, height=1, wrap="word",
+                        font=("Arial", self.base_font_size), undo=True, width=15)
+            t.insert("1.0", val)
+            t.grid(row=r, column=2, sticky="ew", padx=5, pady=2)
+            t.bind("<KeyRelease>", lambda e: e.widget.after(0, self.adjust_height, e.widget))
+            self.ui_elements[q_name][fname] = t
+
+    def _move_field(self, q_name, field_name, direction):
+        """Move field_name up (-1) or down (+1) within its quadrant."""
+        self.sync_to_memory()
+        fields = self.profiles[self.current_profile][q_name]
+        keys = list(fields.keys())
+        idx = keys.index(field_name)
+        new_idx = idx + direction
+        if new_idx < 0 or new_idx >= len(keys):
+            return
+        # Swap
+        keys[idx], keys[new_idx] = keys[new_idx], keys[idx]
+        self.profiles[self.current_profile][q_name] = {k: fields[k] for k in keys}
+
+        # Find the box widget and rebuild just its fields
+        for w in self.quad_frame.winfo_children():
+            if isinstance(w, tk.LabelFrame) and w.cget("text").strip() == q_name:
+                self._build_quad_fields(w, q_name)
+                self.root.after(50, self.batch_adjust_heights)
+                return
 
     def refresh_ui(self, initial_load=False):
         if hasattr(self, 'ui_elements') and self.ui_elements:
             self.sync_to_memory()
 
         for w in self.top_frame.winfo_children(): w.destroy()
+        for w in self.quad_frame.winfo_children(): w.destroy()
         for w in self.scroll_content.winfo_children(): w.destroy()
 
         # --- Header ---
@@ -112,67 +261,106 @@ class QuadrantTool:
 
         q_row = tk.Frame(self.top_frame, bg=self.app_bg_color)
         q_row.pack(fill='x', pady=5)
-        
+
         current_data = self.profiles[self.current_profile]
         q_count = len([k for k in current_data.keys() if k != "Call Notes"])
         tk.Label(q_row, text=f"Quadrants ({q_count}/10):", font=("Arial", 9, "bold"), bg=self.app_bg_color, fg="#F3F4F4").pack(side='left', padx=5)
         tk.Button(q_row, text="+ Add Quadrant", command=self.add_q, bg="#16C47F", fg=self.btn_fg_color).pack(side='left', padx=2)
         tk.Button(q_row, text="- Delete Quadrant", command=self.del_q, bg="#F93827", fg=self.btn_fg_color).pack(side='left', padx=2)
 
-        self.scroll_content.columnconfigure(0, weight=1)
-        self.scroll_content.columnconfigure(1, weight=1)
-
+        # --- Quadrants (fixed, always visible) ---
         self.ui_elements = {}
         standard_quads = {k: v for k, v in current_data.items() if k != "Call Notes"}
 
         for i, (q_name, fields) in enumerate(standard_quads.items()):
-            box = tk.LabelFrame(self.scroll_content, text=f" {q_name} ", bg=self.quad_bg_color, fg=self.quad_fg_color, font=("Arial", 10, "bold"))
-            box.grid(row=i//2, column=i%2, padx=10, pady=10, sticky='nsew')
-            box.columnconfigure(1, weight=1)
+            box = tk.LabelFrame(self.quad_frame, text=f" {q_name} ", bg=self.quad_bg_color, fg=self.quad_fg_color, font=("Arial", 10, "bold"))
+            box.grid(row=i//2, column=i%2, padx=10, pady=2, sticky='nsew')
+            box.columnconfigure(2, weight=1)
 
             btns = tk.Frame(box, bg=self.quad_bg_color)
-            btns.grid(row=0, column=0, columnspan=2, sticky='e', padx=(0, 8))
+            btns.grid(row=0, column=0, columnspan=3, sticky='e', padx=(0, 8))
             tk.Button(btns, text="+", width=2, command=lambda n=q_name: self.add_f(n), fg=self.btn_fg_color).pack(side='right')
             tk.Button(btns, text="-", width=2, command=lambda n=q_name: self.del_f(n), fg=self.btn_fg_color).pack(side='right')
 
             self.ui_elements[q_name] = {}
-            for r, (fname, val) in enumerate(fields.items(), start=1):
-                tk.Label(box, text=fname, font=("Arial", self.base_font_size), bg=self.quad_bg_color, fg=self.quad_fg_color).grid(row=r, column=0, sticky='nw', padx=5, pady=2)
-                t = tk.Text(box, height=1, wrap="word", font=("Arial", self.base_font_size), undo=True, width=15)
-                t.insert("1.0", val)
-                t.grid(row=r, column=1, sticky='ew', padx=5, pady=2)
-                t.bind("<KeyRelease>", lambda e: e.widget.after(0, self.adjust_height, e.widget))
-                self.ui_elements[q_name][fname] = t
+            self._build_quad_fields(box, q_name)
 
-        # --- CALL NOTES LOG ---
+        # --- CALL NOTES LOG (scrollable area below) ---
+        self.scroll_content.columnconfigure(0, weight=1)
         if "Call Notes" in current_data:
             notes_box = tk.LabelFrame(self.scroll_content, text=" CALL LOG NOTES ", bg="#F0F0F0", fg="black", font=("Arial", 10, "bold"))
-            notes_box.grid(row=(len(standard_quads)//2)+1, column=0, columnspan=2, padx=10, pady=20, sticky='nsew')
+            notes_box.grid(row=0, column=0, padx=10, pady=10, sticky='nsew')
             
-            # --- Phone number row ---
-            phone_row = tk.Frame(notes_box, bg="#F0F0F0")
-            phone_row.pack(fill='x', padx=5, pady=(5, 0))
+            # --- Call details: two stacked columns (Target | Caller) ---
+            def make_entry(parent, placeholder, width=18, prefill=""):
+                val = prefill.strip()
+                e = tk.Entry(parent, width=width, font=("Arial", 9), fg="black" if val else "grey")
+                e.insert(0, val if val else placeholder)
+                e.bind("<FocusIn>",  lambda ev, p=placeholder: (ev.widget.delete(0, tk.END), ev.widget.config(fg="black")) if ev.widget.get() == p else None)
+                e.bind("<FocusOut>", lambda ev, p=placeholder: (ev.widget.insert(0, p), ev.widget.config(fg="grey")) if ev.widget.get() == "" else None)
+                return e
 
-            tk.Label(phone_row, text="Target Name:", bg="#F0F0F0", font=("Arial", 8, "bold")).pack(side='left', padx=(0, 3))
-            self.target_name_entry = tk.Entry(phone_row, width=18, font=("Arial", 9), fg="grey")
-            self.target_name_entry.insert(0, "First Last")
-            self.target_name_entry.pack(side='left', padx=(0, 10))
-            self.target_name_entry.bind("<FocusIn>", lambda e: (e.widget.delete(0, tk.END), e.widget.config(fg="black")) if e.widget.get() == "First Last" else None)
-            self.target_name_entry.bind("<FocusOut>", lambda e: (e.widget.insert(0, "First Last"), e.widget.config(fg="grey")) if e.widget.get() == "" else None)
+            prof = self.profiles[self.current_profile]
+            who  = prof.get("Who I Am", {})
+            tgt  = prof.get("Target", {})
 
-            tk.Label(phone_row, text="Outbound Caller ID:", bg="#F0F0F0", font=("Arial", 8, "bold")).pack(side='left', padx=(0, 3))
-            self.caller_id_entry = tk.Entry(phone_row, width=14, font=("Arial", 9), fg="grey")
-            self.caller_id_entry.insert(0, "000-000-0000")
-            self.caller_id_entry.pack(side='left', padx=(0, 10))
-            self.caller_id_entry.bind("<FocusIn>", lambda e: (e.widget.delete(0, tk.END), e.widget.config(fg="black")) if e.widget.get() == "000-000-0000" else None)
-            self.caller_id_entry.bind("<FocusOut>", lambda e: (e.widget.insert(0, "000-000-0000"), e.widget.config(fg="grey")) if e.widget.get() == "" else None)
+            info_row = tk.Frame(notes_box, bg="#F0F0F0")
+            info_row.pack(fill='x', padx=5, pady=(5, 0))
 
-            tk.Label(phone_row, text="Target Phone:", bg="#F0F0F0", font=("Arial", 8, "bold")).pack(side='left', padx=(0, 3))
-            self.target_phone_entry = tk.Entry(phone_row, width=14, font=("Arial", 9), fg="grey")
-            self.target_phone_entry.insert(0, "000-000-0000")
-            self.target_phone_entry.pack(side='left', padx=(0, 10))
-            self.target_phone_entry.bind("<FocusIn>", lambda e: (e.widget.delete(0, tk.END), e.widget.config(fg="black")) if e.widget.get() == "000-000-0000" else None)
-            self.target_phone_entry.bind("<FocusOut>", lambda e: (e.widget.insert(0, "000-000-0000"), e.widget.config(fg="grey")) if e.widget.get() == "" else None)
+            # Target column
+            target_col = tk.Frame(info_row, bg="#F0F0F0")
+            target_col.pack(side='left', padx=(0, 20))
+
+            tk.Label(target_col, text="Target Name:",  bg="#F0F0F0", font=("Arial", 8, "bold"), anchor="w").grid(row=0, column=0, sticky="w", pady=1)
+            self.target_name_entry = make_entry(target_col, "First Last", prefill=tgt.get("Name", ""))
+            self.target_name_entry.grid(row=0, column=1, sticky="w", padx=(4,0), pady=1)
+
+            tk.Label(target_col, text="Job Position:", bg="#F0F0F0", font=("Arial", 8, "bold"), anchor="w").grid(row=1, column=0, sticky="w", pady=1)
+            self.target_position_entry = make_entry(target_col, "Job Title", prefill=tgt.get("Role", ""))
+            self.target_position_entry.grid(row=1, column=1, sticky="w", padx=(4,0), pady=1)
+
+            tk.Label(target_col, text="Target Phone:", bg="#F0F0F0", font=("Arial", 8, "bold"), anchor="w").grid(row=2, column=0, sticky="w", pady=1)
+            self.target_phone_entry = make_entry(target_col, "000-000-0000", width=14, prefill=tgt.get("Phone", ""))
+            self.target_phone_entry.grid(row=2, column=1, sticky="w", padx=(4,0), pady=1)
+
+            # Caller column
+            caller_col = tk.Frame(info_row, bg="#F0F0F0")
+            caller_col.pack(side='left', padx=(0, 10))
+
+            tk.Label(caller_col, text="Calling As:",        bg="#F0F0F0", font=("Arial", 8, "bold"), anchor="w").grid(row=0, column=0, sticky="w", pady=1)
+            self.calling_as_entry = make_entry(caller_col, "First Last", prefill=who.get("Name", ""))
+            self.calling_as_entry.grid(row=0, column=1, sticky="w", padx=(4,0), pady=1)
+
+            tk.Label(caller_col, text="Job Position:",      bg="#F0F0F0", font=("Arial", 8, "bold"), anchor="w").grid(row=1, column=0, sticky="w", pady=1)
+            self.calling_as_position_entry = make_entry(caller_col, "Job Title", prefill=who.get("Role", ""))
+            self.calling_as_position_entry.grid(row=1, column=1, sticky="w", padx=(4,0), pady=1)
+
+            tk.Label(caller_col, text="Outbound Caller ID:", bg="#F0F0F0", font=("Arial", 8, "bold"), anchor="w").grid(row=2, column=0, sticky="w", pady=1)
+            self.caller_id_entry = make_entry(caller_col, "000-000-0000", width=14)
+            self.caller_id_entry.grid(row=2, column=1, sticky="w", padx=(4,0), pady=1)
+
+            # Sync button
+            def sync_call_details():
+                self.sync_to_memory()
+                p  = self.profiles[self.current_profile]
+                w2 = p.get("Who I Am", {})
+                t2 = p.get("Target", {})
+                def set_e(widget, val, ph):
+                    widget.delete(0, tk.END)
+                    if val.strip():
+                        widget.insert(0, val.strip()); widget.config(fg="black")
+                    else:
+                        widget.insert(0, ph);          widget.config(fg="grey")
+                set_e(self.target_name_entry,         t2.get("Name",  ""), "First Last")
+                set_e(self.target_position_entry,     t2.get("Role",  ""), "Job Title")
+                set_e(self.target_phone_entry,        t2.get("Phone", ""), "000-000-0000")
+                set_e(self.calling_as_entry,          w2.get("Name",  ""), "First Last")
+                set_e(self.calling_as_position_entry, w2.get("Role",  ""), "Job Title")
+
+            sync_row = tk.Frame(notes_box, bg="#F0F0F0")
+            sync_row.pack(fill='x', padx=5, pady=(2, 0))
+            tk.Button(sync_row, text="↺ Sync from Quadrants", font=("Arial", 8, "bold"),
+                      bg="#D0D0D0", fg="black", command=sync_call_details).pack(side='left')
 
             ctrls = tk.Frame(notes_box, bg="#F0F0F0")
             ctrls.pack(fill='x', padx=5, pady=5)
@@ -229,6 +417,7 @@ class QuadrantTool:
             self.ui_elements["Call Notes"] = {"Notes": notes_text}
 
         self.root.after(100, self.batch_adjust_heights)
+        self.root.after(150, self._update_quad_scroll)
         if initial_load: self.root.geometry("1000x900")
 
     def sync_to_memory(self):
