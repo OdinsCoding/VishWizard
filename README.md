@@ -7,6 +7,6 @@ Tool for helping Red Team Operators, Social Engineer Penetration Testers, and Cy
 
 ## Example Usage 
 
-### Usage for building and tracking pretext usage during live calls.
+### Usage for building and tracking pretext creation during live calls.
 
 ![Filled Demo](images/filled_demo.png)
