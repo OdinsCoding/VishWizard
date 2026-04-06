@@ -10,3 +10,7 @@ Tool for helping Red Team Operators, Social Engineer Penetration Testers, and Cy
 ### Usage for building and tracking pretext creation during live calls.
 
 ![Filled Demo](images/filled_demo.png)
+
+## JSON Export Example 
+
+![Data Export Demo](images/data_export.png)
