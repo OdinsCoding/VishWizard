@@ -1,26 +1,31 @@
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, simpledialog
 import json
-import copy 
+import copy
 import datetime
 
 class QuadrantTool:
     def __init__(self, root):
         self.root = root
         self.root.title("VishWizard")
-        
+
         # --- GLOBAL STYLE VARIABLES ---
-        self.app_bg_color = "#2C2C2C"     
-        self.btn_fg_color = "black"       
-        self.quad_bg_color = "#ffffff"    
-        self.quad_fg_color = "#333333"    
-        
+        self.app_bg_color = "#2C2C2C"
+        self.btn_fg_color = "black"
+        self.quad_bg_color = "#ffffff"
+        self.quad_fg_color = "#333333"
+
         self.root.configure(bg=self.app_bg_color)
-        
+
         self.base_font_size = 9
         self.profiles = {}
         self.current_profile = "default"
         self.ui_elements = {}
+
+        # --- POP-OUT CALL LOG STATE ---
+        self.call_log_popped_out = False
+        self.pop_out_window = None
+        self.pop_out_notes_text = None  # Reference to the Text widget in pop-out window
 
         # --- THE MASTER TEMPLATE ---
         self.MASTER_TEMPLATE = {
@@ -28,9 +33,9 @@ class QuadrantTool:
             "Target": {"Name": "", "Role": "", "Phone": "", "Email": "", "Location": "", "Other": ""},
             "Pretext": {"Who I work for": "", "Why I'm calling": "", "What I need": "", "Justifications": "", "Payload": ""},
             "Goals & Flags": {"VPN": "", "IT Help Desk": "", "Software": "", "Devices": "", "Security": "", "Other": ""},
-            "Call Notes": {"Notes": ""} 
+            "Call Notes": {"Notes": ""}
         }
-        
+
         self.profiles[self.current_profile] = copy.deepcopy(self.MASTER_TEMPLATE)
         self.setup_main_layout()
         self.refresh_ui(initial_load=True)
@@ -40,38 +45,37 @@ class QuadrantTool:
         self.top_frame = tk.Frame(self.root, bg=self.app_bg_color)
         self.top_frame.pack(side="top", fill="x", padx=5, pady=5)
 
-        # ── Middle section: quadrant canvas (scrollable) + call log canvas ──
-        # They share a single right-side scrollbar column via a PanedWindow
-        # so each scrolls independently without conflicting.
+        # ── Quadrant section: expands when call log is popped out ─────────────
+        # Create a container frame that can expand to fill available space
+        self.quad_container = tk.Frame(self.root, bg=self.app_bg_color)
+        self.quad_container.pack(side="top", fill="both", expand=True, padx=12, pady=(5, 0))
 
-        # Quadrant scrollable area (top pane)
-        quad_outer = tk.Frame(self.root, bg=self.app_bg_color)
-        quad_outer.pack(side="top", fill="x", padx=12, pady=(5, 0))
-
-        self.quad_canvas = tk.Canvas(quad_outer, highlightthickness=0, bg=self.app_bg_color)
-        quad_sb = ttk.Scrollbar(quad_outer, orient="vertical", command=self.quad_canvas.yview)
+        # Quadrant scrollable area
+        self.quad_canvas = tk.Canvas(self.quad_container, highlightthickness=0, bg=self.app_bg_color)
+        self.quad_sb = ttk.Scrollbar(self.quad_container, orient="vertical", command=self.quad_canvas.yview)
         self.quad_frame = tk.Frame(self.quad_canvas, bg=self.app_bg_color)
 
+        # Configure columns - we'll set these dynamically based on popped state
         self.quad_frame.columnconfigure(0, weight=1)
         self.quad_frame.columnconfigure(1, weight=1)
         self.quad_frame.bind("<Configure>", self._update_quad_scroll)
 
         self.quad_canvas_win = self.quad_canvas.create_window((0, 0), window=self.quad_frame, anchor="nw")
-        self.quad_canvas.configure(yscrollcommand=quad_sb.set)
+        self.quad_canvas.configure(yscrollcommand=self.quad_sb.set)
 
         self.quad_canvas.pack(side="left", fill="both", expand=True)
-        quad_sb.pack(side="right", fill="y")
+        self.quad_sb.pack(side="right", fill="y")
         self.quad_canvas.bind("<Configure>", lambda e: (
             self.quad_canvas.itemconfig(self.quad_canvas_win, width=e.width),
             self._update_quad_scroll()
         ))
 
-        # Call log scrollable area (bottom pane, expands to fill remaining space)
-        log_outer = tk.Frame(self.root, bg=self.app_bg_color)
-        log_outer.pack(side="top", fill="both", expand=True, padx=0, pady=0)
+        # Call log scrollable area (bottom pane, shown when not popped out)
+        self.log_outer = tk.Frame(self.root, bg=self.app_bg_color)
+        self.log_outer.pack(side="top", fill="both", expand=True, padx=0, pady=0)
 
-        self.log_canvas = tk.Canvas(log_outer, highlightthickness=0, bg=self.app_bg_color)
-        self.log_scrollbar = ttk.Scrollbar(log_outer, orient="vertical", command=self.log_canvas.yview)
+        self.log_canvas = tk.Canvas(self.log_outer, highlightthickness=0, bg=self.app_bg_color)
+        self.log_scrollbar = ttk.Scrollbar(self.log_outer, orient="vertical", command=self.log_canvas.yview)
         self.scroll_content = tk.Frame(self.log_canvas, bg=self.app_bg_color)
 
         self.scroll_content.bind("<Configure>", lambda e: self.log_canvas.configure(
@@ -112,11 +116,21 @@ class QuadrantTool:
         """Resize quad_canvas height to fit content up to a max, enable scroll if overflow."""
         self.quad_canvas.update_idletasks()
         content_h = self.quad_frame.winfo_reqheight()
-        # Cap visible height: show default quads (~480px), allow scroll for extras
-        if self.root.state() == 'zoomed' or self.root.attributes('-fullscreen'):
-            max_h = 650 # Increased for fullscreen
+
+        # When call log is popped out, expand to use full available space
+        if self.call_log_popped_out:
+            # Use almost full window height when popped out
+            if self.root.state() == 'zoomed' or self.root.attributes('-fullscreen'):
+                max_h = 800
+            else:
+                max_h = 700
         else:
-            max_h = 480  # Standard size
+            # Cap visible height: show default quads (~480px), allow scroll for extras
+            if self.root.state() == 'zoomed' or self.root.attributes('-fullscreen'):
+                max_h = 650
+            else:
+                max_h = 480
+
         visible_h = min(content_h, max_h)
         self.quad_canvas.configure(height=visible_h, scrollregion=self.quad_canvas.bbox("all"))
 
@@ -215,13 +229,16 @@ class QuadrantTool:
                      bg=self.quad_bg_color, fg=self.quad_fg_color
                      ).grid(row=r, column=1, sticky="nw", padx=(2, 5), pady=2)
 
-            # Text widget col 2
+            # Text widget col 2 - responsive width
             t = tk.Text(box, height=1, wrap="word",
-                        font=("Arial", self.base_font_size), undo=True, width=15)
+                        font=("Arial", self.base_font_size), undo=True)
             t.insert("1.0", val)
             t.grid(row=r, column=2, sticky="ew", padx=5, pady=2)
             t.bind("<KeyRelease>", lambda e: e.widget.after(0, self.adjust_height, e.widget))
             self.ui_elements[q_name][fname] = t
+
+        # Make column 2 expand to fill available space
+        box.columnconfigure(2, weight=1)
 
     def _move_field(self, q_name, field_name, direction):
         """Move field_name up (-1) or down (+1) within its quadrant."""
@@ -242,6 +259,276 @@ class QuadrantTool:
                 self._build_quad_fields(w, q_name)
                 self.root.after(50, self.batch_adjust_heights)
                 return
+
+    def toggle_call_log_window(self):
+        """Toggle the call log between popped-out window and docked in main window."""
+        if self.call_log_popped_out:
+            self.dock_call_log()
+        else:
+            self.pop_out_call_log()
+
+    def pop_out_call_log(self):
+        """Create a separate window for the call log."""
+        # Sync current state before popping out
+        self.sync_to_memory()
+
+        # Update state first
+        self.call_log_popped_out = True
+
+        # Hide the call log area in the main window
+        self.log_outer.pack_forget()
+
+        # Refresh UI to show up to 10 quadrants in expanded space
+        self.refresh_ui()
+
+        # Create the pop-out window
+        self.pop_out_window = tk.Toplevel(self.root)
+        self.pop_out_window.title(f"Call Log - {self.current_profile}")
+        self.pop_out_window.geometry("1100x600")
+        self.pop_out_window.configure(bg=self.app_bg_color)
+
+        # Handle window close - dock back instead of destroying
+        self.pop_out_window.protocol("WM_DELETE_WINDOW", self.dock_call_log)
+
+        # Build the call log UI in the pop-out window
+        self._build_call_log_ui(self.pop_out_window, is_pop_out=True)
+
+    def dock_call_log(self):
+        """Dock the call log back into the main window."""
+        # Sync from pop-out before docking
+        if self.pop_out_notes_text:
+            self._sync_from_pop_out()
+
+        # Close the pop-out window
+        if self.pop_out_window:
+            self.pop_out_window.destroy()
+            self.pop_out_window = None
+            self.pop_out_notes_text = None
+
+        # Update state BEFORE refreshing UI
+        self.call_log_popped_out = False
+
+        # Show the call log area in the main window
+        self.log_outer.pack(side="top", fill="both", expand=True, padx=0, pady=0)
+
+        # Refresh the UI to rebuild with 4 quadrants and call log
+        self.refresh_ui()
+
+        # Update button text after UI refresh
+        self._update_pop_out_button_text()
+
+    def _update_pop_out_button_text(self):
+        """Update the pop-out button text based on current state."""
+        # Find the pop-out button in the call log controls
+        if hasattr(self, 'pop_out_btn') and self.pop_out_btn.winfo_exists():
+            if self.call_log_popped_out:
+                self.pop_out_btn.config(text="Dock Call Log")
+            else:
+                self.pop_out_btn.config(text="Pop Out Call Log")
+
+    def _sync_to_pop_out(self, event=None):
+        """Sync changes from main window to pop-out window."""
+        if self.pop_out_notes_text and self.call_log_popped_out:
+            main_text = self.ui_elements.get("Call Notes", {}).get("Notes")
+            if main_text:
+                pop_out_content = self.pop_out_notes_text.get("1.0", "end-1c")
+                main_content = main_text.get("1.0", "end-1c")
+                if pop_out_content != main_content:
+                    self.pop_out_notes_text.delete("1.0", tk.END)
+                    self.pop_out_notes_text.insert("1.0", main_content)
+
+    def _sync_from_pop_out(self, event=None):
+        """Sync changes from pop-out window to main window."""
+        if self.pop_out_notes_text:
+            pop_out_content = self.pop_out_notes_text.get("1.0", "end-1c")
+            current_data = self.profiles[self.current_profile]
+            current_data["Call Notes"]["Notes"] = pop_out_content
+
+    def _sync_call_log_from_quadrants(self):
+        """Sync call log fields from quadrant data after import."""
+        prof = self.profiles[self.current_profile]
+        who = prof.get("Who I Am", {})
+        tgt = prof.get("Target", {})
+
+        # Update call log entries if they exist
+        if hasattr(self, 'target_name_entry') and self.target_name_entry.winfo_exists():
+            self._set_entry_value(self.target_name_entry, tgt.get("Name", ""), "First Last")
+        if hasattr(self, 'target_position_entry') and self.target_position_entry.winfo_exists():
+            self._set_entry_value(self.target_position_entry, tgt.get("Role", ""), "Job Title")
+        if hasattr(self, 'target_phone_entry') and self.target_phone_entry.winfo_exists():
+            self._set_entry_value(self.target_phone_entry, tgt.get("Phone", ""), "000-000-0000")
+        if hasattr(self, 'calling_as_entry') and self.calling_as_entry.winfo_exists():
+            self._set_entry_value(self.calling_as_entry, who.get("Name", ""), "First Last")
+        if hasattr(self, 'calling_as_position_entry') and self.calling_as_position_entry.winfo_exists():
+            self._set_entry_value(self.calling_as_position_entry, who.get("Role", ""), "Job Title")
+
+    def _set_entry_value(self, widget, value, placeholder):
+        """Helper to set entry value with proper styling."""
+        if widget and widget.winfo_exists():
+            widget.delete(0, tk.END)
+            if value and value.strip():
+                widget.insert(0, value.strip())
+                widget.config(fg="black")
+            else:
+                widget.insert(0, placeholder)
+                widget.config(fg="grey")
+
+    def _build_call_log_ui(self, parent, is_pop_out=False):
+        """Build the call log UI in either the main window or pop-out window."""
+        # For pop-out, add a top bar with dock button that's always visible
+        if is_pop_out:
+            top_bar = tk.Frame(parent, bg=self.app_bg_color)
+            top_bar.pack(fill="x", padx=10, pady=(10, 0))
+            tk.Button(top_bar, text="Dock to Main", bg="#FF6B6B", fg="white", font=("Arial", 9, "bold"),
+                      command=self.dock_call_log).pack(side='left')
+            tk.Label(top_bar, text="Call Log - Pop Out Window", bg=self.app_bg_color, fg="white",
+                     font=("Arial", 9)).pack(side='left', padx=10)
+
+        notes_box = tk.LabelFrame(parent, text=" CALL LOG NOTES ", bg="#F0F0F0", fg="black", font=("Arial", 10, "bold"))
+        if is_pop_out:
+            notes_box.pack(fill="both", expand=True, padx=10, pady=10)
+        else:
+            notes_box.grid(row=0, column=0, padx=10, pady=10, sticky='nsew')
+
+        current_data = self.profiles[self.current_profile]
+
+        # --- Call details: two stacked columns (Target | Caller) ---
+        def make_entry(parent, placeholder, width=18, prefill=""):
+            val = prefill.strip()
+            e = tk.Entry(parent, width=width, font=("Arial", 9), fg="black" if val else "grey")
+            e.insert(0, val if val else placeholder)
+            e.bind("<FocusIn>",  lambda ev, p=placeholder: (ev.widget.delete(0, tk.END), ev.widget.config(fg="black")) if ev.widget.get() == p else None)
+            e.bind("<FocusOut>", lambda ev, p=placeholder: (ev.widget.insert(0, p), ev.widget.config(fg="grey")) if ev.widget.get() == "" else None)
+            return e
+
+        prof = self.profiles[self.current_profile]
+        who  = prof.get("Who I Am", {})
+        tgt  = prof.get("Target", {})
+
+        info_row = tk.Frame(notes_box, bg="#F0F0F0")
+        info_row.pack(fill='x', padx=5, pady=(5, 0))
+
+        # Target column
+        target_col = tk.Frame(info_row, bg="#F0F0F0")
+        target_col.pack(side='left', padx=(0, 20))
+
+        tk.Label(target_col, text="Target Name:",  bg="#F0F0F0", font=("Arial", 8, "bold"), anchor="w").grid(row=0, column=0, sticky="w", pady=1)
+        self.target_name_entry = make_entry(target_col, "First Last", prefill=tgt.get("Name", ""))
+        self.target_name_entry.grid(row=0, column=1, sticky="w", padx=(4,0), pady=1)
+
+        tk.Label(target_col, text="Job Position:", bg="#F0F0F0", font=("Arial", 8, "bold"), anchor="w").grid(row=1, column=0, sticky="w", pady=1)
+        self.target_position_entry = make_entry(target_col, "Job Title", prefill=tgt.get("Role", ""))
+        self.target_position_entry.grid(row=1, column=1, sticky="w", padx=(4,0), pady=1)
+
+        tk.Label(target_col, text="Target Phone:", bg="#F0F0F0", font=("Arial", 8, "bold"), anchor="w").grid(row=2, column=0, sticky="w", pady=1)
+        self.target_phone_entry = make_entry(target_col, "000-000-0000", width=14, prefill=tgt.get("Phone", ""))
+        self.target_phone_entry.grid(row=2, column=1, sticky="w", padx=(4,0), pady=1)
+
+        # Caller column
+        caller_col = tk.Frame(info_row, bg="#F0F0F0")
+        caller_col.pack(side='left', padx=(0, 10))
+
+        tk.Label(caller_col, text="Calling As:",        bg="#F0F0F0", font=("Arial", 8, "bold"), anchor="w").grid(row=0, column=0, sticky="w", pady=1)
+        self.calling_as_entry = make_entry(caller_col, "First Last", prefill=who.get("Name", ""))
+        self.calling_as_entry.grid(row=0, column=1, sticky="w", padx=(4,0), pady=1)
+
+        tk.Label(caller_col, text="Job Position:",      bg="#F0F0F0", font=("Arial", 8, "bold"), anchor="w").grid(row=1, column=0, sticky="w", pady=1)
+        self.calling_as_position_entry = make_entry(caller_col, "Job Title", prefill=who.get("Role", ""))
+        self.calling_as_position_entry.grid(row=1, column=1, sticky="w", padx=(4,0), pady=1)
+
+        tk.Label(caller_col, text="Outbound Caller ID:", bg="#F0F0F0", font=("Arial", 8, "bold"), anchor="w").grid(row=2, column=0, sticky="w", pady=1)
+        self.caller_id_entry = make_entry(caller_col, "000-000-0000", width=14)
+        self.caller_id_entry.grid(row=2, column=1, sticky="w", padx=(4,0), pady=1)
+
+        # Sync button
+        def sync_call_details():
+            self.sync_to_memory()
+            p  = self.profiles[self.current_profile]
+            w2 = p.get("Who I Am", {})
+            t2 = p.get("Target", {})
+            def set_e(widget, val, ph):
+                widget.delete(0, tk.END)
+                if val.strip():
+                    widget.insert(0, val.strip()); widget.config(fg="black")
+                else:
+                    widget.insert(0, ph);          widget.config(fg="grey")
+            set_e(self.target_name_entry,         t2.get("Name",  ""), "First Last")
+            set_e(self.target_position_entry,     t2.get("Role",  ""), "Job Title")
+            set_e(self.target_phone_entry,        t2.get("Phone", ""), "000-000-0000")
+            set_e(self.calling_as_entry,          w2.get("Name",  ""), "First Last")
+            set_e(self.calling_as_position_entry, w2.get("Role",  ""), "Job Title")
+
+        sync_row = tk.Frame(notes_box, bg="#F0F0F0")
+        sync_row.pack(fill='x', padx=5, pady=(2, 0))
+        tk.Button(sync_row, text="↺ Sync from Quadrants", font=("Arial", 8, "bold"),
+                  bg="#D0D0D0", fg="black", command=sync_call_details).pack(side='left')
+
+        ctrls = tk.Frame(notes_box, bg="#F0F0F0")
+        ctrls.pack(fill='x', padx=5, pady=5)
+
+        # --- Pop Out / Dock Call Log Button (moved to call log section) ---
+        if not is_pop_out:
+            self.pop_out_btn = tk.Button(ctrls, text="Pop Out Call Log", command=self.toggle_call_log_window,
+                                          bg="#4A90D9", fg="white", font=("Arial", 8, "bold"))
+            self.pop_out_btn.pack(side='left', padx=5)
+
+        tk.Button(ctrls, text="Add Current Time Entry", bg="#16C47F", fg="white", font=("Arial", 8, "bold"),
+                  command=lambda: self.add_note_entry(notes_text, custom=False)).pack(side='left', padx=5)
+
+        self.current_tz_var = tk.StringVar(value="MDT")
+        current_tz_m = ttk.Combobox(ctrls, textvariable=self.current_tz_var, width=5,
+                                    values=("MDT","MST","CDT","CST","EDT","EST","PDT","PST"), state="readonly")
+        current_tz_m.pack(side='left', padx=(0, 5))
+
+        tk.Label(ctrls, text="| Custom Date:", bg="#F0F0F0").pack(side='left', padx=5)
+
+        now = datetime.datetime.now()
+        self.month_var = tk.StringVar(value=now.strftime("%m"))
+        month_m = ttk.Combobox(ctrls, textvariable=self.month_var, width=3,
+                               values=[f"{i:02d}" for i in range(1, 13)], state="readonly")
+        month_m.pack(side='left', padx=1)
+        tk.Label(ctrls, text="/", bg="#F0F0F0").pack(side='left')
+        self.day_var = tk.StringVar(value=now.strftime("%d"))
+        day_m = ttk.Combobox(ctrls, textvariable=self.day_var, width=3,
+                             values=[f"{i:02d}" for i in range(1, 32)], state="readonly")
+        day_m.pack(side='left', padx=1)
+        tk.Label(ctrls, text="/", bg="#F0F0F0").pack(side='left')
+        self.year_var = tk.StringVar(value=now.strftime("%Y"))
+        year_m = ttk.Combobox(ctrls, textvariable=self.year_var, width=5,
+                              values=[str(now.year + i) for i in range(-2, 3)], state="readonly")
+        year_m.pack(side='left', padx=1)
+
+        tk.Label(ctrls, text="| Custom Time:", bg="#F0F0F0").pack(side='left', padx=5)
+
+        now = datetime.datetime.now()
+        self.hr_var = tk.StringVar(value=now.strftime("%I"))
+        hr_m = ttk.Combobox(ctrls, textvariable=self.hr_var, width=3, values=[f"{i:02d}" for i in range(1, 13)], state="readonly")
+        hr_m.pack(side='left', padx=1)
+        tk.Label(ctrls, text=":", bg="#F0F0F0").pack(side='left')
+        self.min_var = tk.StringVar(value=now.strftime("%M"))
+        min_m = ttk.Combobox(ctrls, textvariable=self.min_var, width=3, values=[f"{i:02d}" for i in range(0, 60)], state="readonly")
+        min_m.pack(side='left', padx=1)
+        self.ampm_var = tk.StringVar(value=now.strftime("%p"))
+        ap_m = ttk.Combobox(ctrls, textvariable=self.ampm_var, width=4, values=("AM","PM"), state="readonly")
+        ap_m.pack(side='left', padx=2)
+        self.tz_var = tk.StringVar(value="MDT")
+        tz_m = ttk.Combobox(ctrls, textvariable=self.tz_var, width=5, values=("MDT","MST","CDT","CST","EDT","EST","PDT","PST"), state="readonly")
+        tz_m.pack(side='left', padx=2)
+
+        tk.Button(ctrls, text="Add Custom Entry", bg="#00A8E8", fg="white", font=("Arial", 8, "bold"),
+                  command=lambda: self.add_note_entry(notes_text, custom=True)).pack(side='left', padx=5)
+
+        notes_text = tk.Text(notes_box, height=12, wrap="word", font=("Arial", 10), undo=True)
+        notes_text.insert("1.0", current_data["Call Notes"].get("Notes", ""))
+        notes_text.pack(fill='both', expand=True, padx=5, pady=5)
+
+        if is_pop_out:
+            self.pop_out_notes_text = notes_text
+            # Bind to sync changes from pop-out back to main
+            notes_text.bind("<KeyRelease>", self._sync_from_pop_out)
+            notes_text.bind("<ButtonRelease>", self._sync_from_pop_out)
+        else:
+            self.ui_elements["Call Notes"] = {"Notes": notes_text}
 
     def refresh_ui(self, initial_load=False):
         if hasattr(self, 'ui_elements') and self.ui_elements:
@@ -264,17 +551,39 @@ class QuadrantTool:
 
         current_data = self.profiles[self.current_profile]
         q_count = len([k for k in current_data.keys() if k != "Call Notes"])
-        tk.Label(q_row, text=f"Quadrants ({q_count}/10):", font=("Arial", 9, "bold"), bg=self.app_bg_color, fg="#F3F4F4").pack(side='left', padx=5)
+        self.quadrant_label = tk.Label(q_row, text=f"Quadrants ({q_count}/10):", font=("Arial", 9, "bold"), bg=self.app_bg_color, fg="#F3F4F4")
+        self.quadrant_label.pack(side='left', padx=5)
         tk.Button(q_row, text="+ Add Quadrant", command=self.add_q, bg="#16C47F", fg=self.btn_fg_color).pack(side='left', padx=2)
         tk.Button(q_row, text="- Delete Quadrant", command=self.del_q, bg="#F93827", fg=self.btn_fg_color).pack(side='left', padx=2)
 
-        # --- Quadrants (fixed, always visible) ---
+        # --- Quadrants ---
         self.ui_elements = {}
         standard_quads = {k: v for k, v in current_data.items() if k != "Call Notes"}
 
-        for i, (q_name, fields) in enumerate(standard_quads.items()):
+        # Configure grid columns based on popped state
+        # When popped out: first row max 4, then wrap to next row (can show up to 10 in 3 rows)
+        # When attached: use 2 columns for 4 quadrants (2x2 grid)
+        if self.call_log_popped_out:
+            # First row: max 4 quadrants, then wrap
+            num_cols = 4
+            # Configure up to 4 columns
+            for c in range(4):
+                self.quad_frame.columnconfigure(c, weight=1)
+        else:
+            # Standard 2-column layout for 4 quadrants
+            num_cols = 2
+            for c in range(4):  # Clear all configs first
+                self.quad_frame.columnconfigure(c, weight=0)
+            self.quad_frame.columnconfigure(0, weight=1)
+            self.quad_frame.columnconfigure(1, weight=1)
+
+        # Build quadrants - always build ALL existing quadrants, not just first N
+        # This preserves all data; visibility is controlled by scroll region
+        quad_list = list(standard_quads.items())
+
+        for i, (q_name, fields) in enumerate(quad_list):
             box = tk.LabelFrame(self.quad_frame, text=f" {q_name} ", bg=self.quad_bg_color, fg=self.quad_fg_color, font=("Arial", 10, "bold"))
-            box.grid(row=i//2, column=i%2, padx=10, pady=2, sticky='nsew')
+            box.grid(row=i//num_cols, column=i%num_cols, padx=10, pady=2, sticky='nsew')
             box.columnconfigure(2, weight=1)
 
             btns = tk.Frame(box, bg=self.quad_bg_color)
@@ -286,145 +595,26 @@ class QuadrantTool:
             self._build_quad_fields(box, q_name)
 
         # --- CALL NOTES LOG (scrollable area below) ---
-        self.scroll_content.columnconfigure(0, weight=1)
-        if "Call Notes" in current_data:
-            notes_box = tk.LabelFrame(self.scroll_content, text=" CALL LOG NOTES ", bg="#F0F0F0", fg="black", font=("Arial", 10, "bold"))
-            notes_box.grid(row=0, column=0, padx=10, pady=10, sticky='nsew')
-            
-            # --- Call details: two stacked columns (Target | Caller) ---
-            def make_entry(parent, placeholder, width=18, prefill=""):
-                val = prefill.strip()
-                e = tk.Entry(parent, width=width, font=("Arial", 9), fg="black" if val else "grey")
-                e.insert(0, val if val else placeholder)
-                e.bind("<FocusIn>",  lambda ev, p=placeholder: (ev.widget.delete(0, tk.END), ev.widget.config(fg="black")) if ev.widget.get() == p else None)
-                e.bind("<FocusOut>", lambda ev, p=placeholder: (ev.widget.insert(0, p), ev.widget.config(fg="grey")) if ev.widget.get() == "" else None)
-                return e
-
-            prof = self.profiles[self.current_profile]
-            who  = prof.get("Who I Am", {})
-            tgt  = prof.get("Target", {})
-
-            info_row = tk.Frame(notes_box, bg="#F0F0F0")
-            info_row.pack(fill='x', padx=5, pady=(5, 0))
-
-            # Target column
-            target_col = tk.Frame(info_row, bg="#F0F0F0")
-            target_col.pack(side='left', padx=(0, 20))
-
-            tk.Label(target_col, text="Target Name:",  bg="#F0F0F0", font=("Arial", 8, "bold"), anchor="w").grid(row=0, column=0, sticky="w", pady=1)
-            self.target_name_entry = make_entry(target_col, "First Last", prefill=tgt.get("Name", ""))
-            self.target_name_entry.grid(row=0, column=1, sticky="w", padx=(4,0), pady=1)
-
-            tk.Label(target_col, text="Job Position:", bg="#F0F0F0", font=("Arial", 8, "bold"), anchor="w").grid(row=1, column=0, sticky="w", pady=1)
-            self.target_position_entry = make_entry(target_col, "Job Title", prefill=tgt.get("Role", ""))
-            self.target_position_entry.grid(row=1, column=1, sticky="w", padx=(4,0), pady=1)
-
-            tk.Label(target_col, text="Target Phone:", bg="#F0F0F0", font=("Arial", 8, "bold"), anchor="w").grid(row=2, column=0, sticky="w", pady=1)
-            self.target_phone_entry = make_entry(target_col, "000-000-0000", width=14, prefill=tgt.get("Phone", ""))
-            self.target_phone_entry.grid(row=2, column=1, sticky="w", padx=(4,0), pady=1)
-
-            # Caller column
-            caller_col = tk.Frame(info_row, bg="#F0F0F0")
-            caller_col.pack(side='left', padx=(0, 10))
-
-            tk.Label(caller_col, text="Calling As:",        bg="#F0F0F0", font=("Arial", 8, "bold"), anchor="w").grid(row=0, column=0, sticky="w", pady=1)
-            self.calling_as_entry = make_entry(caller_col, "First Last", prefill=who.get("Name", ""))
-            self.calling_as_entry.grid(row=0, column=1, sticky="w", padx=(4,0), pady=1)
-
-            tk.Label(caller_col, text="Job Position:",      bg="#F0F0F0", font=("Arial", 8, "bold"), anchor="w").grid(row=1, column=0, sticky="w", pady=1)
-            self.calling_as_position_entry = make_entry(caller_col, "Job Title", prefill=who.get("Role", ""))
-            self.calling_as_position_entry.grid(row=1, column=1, sticky="w", padx=(4,0), pady=1)
-
-            tk.Label(caller_col, text="Outbound Caller ID:", bg="#F0F0F0", font=("Arial", 8, "bold"), anchor="w").grid(row=2, column=0, sticky="w", pady=1)
-            self.caller_id_entry = make_entry(caller_col, "000-000-0000", width=14)
-            self.caller_id_entry.grid(row=2, column=1, sticky="w", padx=(4,0), pady=1)
-
-            # Sync button
-            def sync_call_details():
-                self.sync_to_memory()
-                p  = self.profiles[self.current_profile]
-                w2 = p.get("Who I Am", {})
-                t2 = p.get("Target", {})
-                def set_e(widget, val, ph):
-                    widget.delete(0, tk.END)
-                    if val.strip():
-                        widget.insert(0, val.strip()); widget.config(fg="black")
-                    else:
-                        widget.insert(0, ph);          widget.config(fg="grey")
-                set_e(self.target_name_entry,         t2.get("Name",  ""), "First Last")
-                set_e(self.target_position_entry,     t2.get("Role",  ""), "Job Title")
-                set_e(self.target_phone_entry,        t2.get("Phone", ""), "000-000-0000")
-                set_e(self.calling_as_entry,          w2.get("Name",  ""), "First Last")
-                set_e(self.calling_as_position_entry, w2.get("Role",  ""), "Job Title")
-
-            sync_row = tk.Frame(notes_box, bg="#F0F0F0")
-            sync_row.pack(fill='x', padx=5, pady=(2, 0))
-            tk.Button(sync_row, text="↺ Sync from Quadrants", font=("Arial", 8, "bold"),
-                      bg="#D0D0D0", fg="black", command=sync_call_details).pack(side='left')
-
-            ctrls = tk.Frame(notes_box, bg="#F0F0F0")
-            ctrls.pack(fill='x', padx=5, pady=5)
-
-            tk.Button(ctrls, text="Add Current Time Entry", bg="#16C47F", fg="white", font=("Arial", 8, "bold"),
-                      command=lambda: self.add_note_entry(notes_text, custom=False)).pack(side='left', padx=5)
-
-            self.current_tz_var = tk.StringVar(value="MDT")
-            current_tz_m = ttk.Combobox(ctrls, textvariable=self.current_tz_var, width=5,
-                                        values=("MDT","MST","CDT","CST","EDT","EST","PDT","PST"), state="readonly")
-            current_tz_m.pack(side='left', padx=(0, 5))
-
-            tk.Label(ctrls, text="| Custom Date:", bg="#F0F0F0").pack(side='left', padx=5)
-
-            now = datetime.datetime.now()
-            self.month_var = tk.StringVar(value=now.strftime("%m"))
-            month_m = ttk.Combobox(ctrls, textvariable=self.month_var, width=3,
-                                   values=[f"{i:02d}" for i in range(1, 13)], state="readonly")
-            month_m.pack(side='left', padx=1)
-            tk.Label(ctrls, text="/", bg="#F0F0F0").pack(side='left')
-            self.day_var = tk.StringVar(value=now.strftime("%d"))
-            day_m = ttk.Combobox(ctrls, textvariable=self.day_var, width=3,
-                                 values=[f"{i:02d}" for i in range(1, 32)], state="readonly")
-            day_m.pack(side='left', padx=1)
-            tk.Label(ctrls, text="/", bg="#F0F0F0").pack(side='left')
-            self.year_var = tk.StringVar(value=now.strftime("%Y"))
-            year_m = ttk.Combobox(ctrls, textvariable=self.year_var, width=5,
-                                  values=[str(now.year + i) for i in range(-2, 3)], state="readonly")
-            year_m.pack(side='left', padx=1)
-
-            tk.Label(ctrls, text="| Custom Time:", bg="#F0F0F0").pack(side='left', padx=5)
-
-            now = datetime.datetime.now()
-            self.hr_var = tk.StringVar(value=now.strftime("%I"))
-            hr_m = ttk.Combobox(ctrls, textvariable=self.hr_var, width=3, values=[f"{i:02d}" for i in range(1, 13)], state="readonly")
-            hr_m.pack(side='left', padx=1)
-            tk.Label(ctrls, text=":", bg="#F0F0F0").pack(side='left')
-            self.min_var = tk.StringVar(value=now.strftime("%M"))
-            min_m = ttk.Combobox(ctrls, textvariable=self.min_var, width=3, values=[f"{i:02d}" for i in range(0, 60)], state="readonly")
-            min_m.pack(side='left', padx=1)
-            self.ampm_var = tk.StringVar(value=now.strftime("%p"))
-            ap_m = ttk.Combobox(ctrls, textvariable=self.ampm_var, width=4, values=("AM","PM"), state="readonly")
-            ap_m.pack(side='left', padx=2)
-            self.tz_var = tk.StringVar(value="MDT")
-            tz_m = ttk.Combobox(ctrls, textvariable=self.tz_var, width=5, values=("MDT","MST","CDT","CST","EDT","EST","PDT","PST"), state="readonly")
-            tz_m.pack(side='left', padx=2)
-
-            tk.Button(ctrls, text="Add Custom Entry", bg="#00A8E8", fg="white", font=("Arial", 8, "bold"),
-                      command=lambda: self.add_note_entry(notes_text, custom=True)).pack(side='left', padx=5)
-
-            notes_text = tk.Text(notes_box, height=12, wrap="word", font=("Arial", 10), undo=True)
-            notes_text.insert("1.0", current_data["Call Notes"].get("Notes", ""))
-            notes_text.pack(fill='both', expand=True, padx=5, pady=5)
-            self.ui_elements["Call Notes"] = {"Notes": notes_text}
+        # Only build if NOT popped out
+        if not self.call_log_popped_out:
+            self.scroll_content.columnconfigure(0, weight=1)
+            if "Call Notes" in current_data:
+                self._build_call_log_ui(self.scroll_content, is_pop_out=False)
 
         self.root.after(100, self.batch_adjust_heights)
         self.root.after(150, self._update_quad_scroll)
-        if initial_load: self.root.geometry("1000x900")
+        if initial_load: self.root.geometry("1100x900")
 
     def sync_to_memory(self):
+        # Sync quadrants
         for q_name, fields in self.ui_elements.items():
             if q_name in self.profiles[self.current_profile]:
                 for f_name, widget in fields.items():
                     self.profiles[self.current_profile][q_name][f_name] = widget.get("1.0", "end-1c")
+
+        # Sync from pop-out if active
+        if self.call_log_popped_out and self.pop_out_notes_text:
+            self._sync_from_pop_out()
 
     def batch_adjust_heights(self):
         for q in self.ui_elements.values():
@@ -441,6 +631,10 @@ class QuadrantTool:
         except: pass
 
     def new_profile(self):
+        # Dock call log before switching profiles to avoid window sync issues
+        if self.call_log_popped_out:
+            self.dock_call_log()
+
         n = simpledialog.askstring("New Profile", "Enter Profile Name:")
         if n:
             self.profiles[n] = copy.deepcopy(self.MASTER_TEMPLATE)
@@ -464,6 +658,8 @@ class QuadrantTool:
             self.current_profile = data["active_profile"]
             self.ui_elements = {}
             self.refresh_ui()
+            # Sync call log from quadrants after import
+            self.root.after(200, self._sync_call_log_from_quadrants)
 
     def add_q(self):
         if len(self.profiles[self.current_profile]) >= 11: return
