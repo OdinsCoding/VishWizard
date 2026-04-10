@@ -112,7 +112,7 @@ class QuadrantTool:
         """Resize quad_canvas height to fit content up to a max, enable scroll if overflow."""
         self.quad_canvas.update_idletasks()
         content_h = self.quad_frame.winfo_reqheight()
-        # Cap visible height: show default quads (~450px), allow scroll for extras
+        # Cap visible height: show default quads (~480px), allow scroll for extras
         if self.root.state() == 'zoomed' or self.root.attributes('-fullscreen'):
             max_h = 650 # Increased for fullscreen
         else:
